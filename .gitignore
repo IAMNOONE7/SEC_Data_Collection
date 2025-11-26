@@ -1,0 +1,55 @@
+# -----------------------------------------
+# Python
+# -----------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+*.db
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+env/
+
+# -----------------------------------------
+# Environment variables
+# -----------------------------------------
+.env
+
+# -----------------------------------------
+# IDE / Editor files
+# -----------------------------------------
+.idea/
+.vscode/
+*.iml
+
+# -----------------------------------------
+# OS generated files
+# -----------------------------------------
+.DS_Store
+Thumbs.db
+
+# -----------------------------------------
+# Project-specific ignores
+# -----------------------------------------
+# Downloaded SEC raw filings
+backend/data/10x_raw_xbrl/
+backend/data/10x_filings/
+
+# Submissions
+backend/data/10x_submissions/10x_submissions.json
+
+# Company mapping file
+companies.json
+
+# Generated comparison results
+comparison_output/
+*.csv
+*.json
+
+# Logs
+*.log
+logs/
