@@ -54,6 +54,8 @@ from backend.src.app.services.xbrl_company_totals_service import (
     FactRow,
 )
 
+from backend.src.app.Helpers.metric_mapping import build_metric_map_for_company
+
 # ---------------------------
 #   Helper dataclasses
 # ---------------------------
@@ -262,7 +264,7 @@ def main() -> int:
     logging.info("Loading submissions from %s", submissions_path)
 
     payload = load_submissions_json(submissions_path)
-    filings = pick_latest_10q_per_ticker(payload, max_companies=10)
+    filings = pick_latest_10q_per_ticker(payload, max_companies=1000)
 
     if not filings:
         logging.error("No 10-Q filings found in submissions JSON.")
@@ -286,7 +288,23 @@ def main() -> int:
         logging.error("No usable XBRL data extracted for any ticker.")
         return 1
 
-    pretty_print_summary(ticker_facts)
+    metric_map_by_ticker: Dict[str, Dict[str, str]] = {}
+
+    for tf in ticker_facts:
+        metric_map = build_metric_map_for_company(tf.facts)
+        metric_map_by_ticker[tf.ticker] = metric_map
+
+        print(f"\n=== METRIC MAP FOR {tf.ticker} ({tf.filing_date}) ===")
+        if not metric_map:
+            print("  (no metrics detected)")
+        else:
+            for canonical, concept in metric_map.items():
+                print(f"  {canonical:15} -> {concept}")
+
+    out_path = BACKEND_ROOT / "data" / "metric_map_by_ticker.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(metric_map_by_ticker, indent=2), encoding="utf-8")
+    logging.info("Saved metric map to %s", out_path)
     return 0
 
 
