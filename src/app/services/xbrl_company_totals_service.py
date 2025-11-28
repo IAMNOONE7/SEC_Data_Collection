@@ -358,3 +358,6 @@ def print_by_context(rows: List[FactRow], contexts: Dict[str, ContextInfo], max_
 
         if len(facts) > max_facts_per_ctx:
             print(f"    ... ({len(facts) - max_facts_per_ctx} more)")
+
+
+    return

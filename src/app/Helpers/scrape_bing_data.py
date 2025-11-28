@@ -23,7 +23,7 @@ def close_privacy_and_popups(driver):
             if label in ("i accept", "accept", "reject all", "reject"):
                 try:
                     btn.click()
-                    print("✔ Privacy window closed.")
+                    print("Privacy window closed.")
                     time.sleep(0.7)
                     break
                 except:
@@ -46,43 +46,6 @@ def close_privacy_and_popups(driver):
     except:
         pass
 
-
-"""
-def _ensure_quarterly_view(driver, wait: WebDriverWait) -> None:
-    
-    Make sure the 'Quarterly' toggle is active for the current Financials tab.
-
-    Edge shows two buttons like:
-        [ Annual ] [ Quarterly ]
-
-    On tab switches (Income / Balance Sheet / Cash Flow) it often defaults to
-    Annual again, so we must re-click Quarterly each time.
-   
-    try:
-        # both 'Annual' and 'Quarterly' share this class
-        buttons = wait.until(
-            EC.presence_of_all_elements_located(
-                (By.CSS_SELECTOR, "button.selectButton-DS-unknown1-1")
-            )
-        )
-    except TimeoutException:
-        logging.warning("Could not find Annual/Quarterly toggle – staying in current view.")
-        return
-
-    for btn in buttons:
-        label = btn.text.strip().lower()
-        if "quarterly" not in label:
-            continue
-
-        classes = btn.get_attribute("class") or ""
-        # if it’s not already selected, click it
-        if "selectedButton" not in classes:
-            btn.click()
-            # tiny pause so the table content can update
-            time.sleep(1.0)
-        break
-"""
-
 def _ensure_quarterly_view(driver, wait: WebDriverWait) -> None:
     """
     Make sure the 'Quarterly' toggle is active for the current Financials tab.
@@ -104,21 +67,6 @@ def _ensure_quarterly_view(driver, wait: WebDriverWait) -> None:
     if "selected" not in classes.lower():
         quarterly_btn.click()
         time.sleep(1.0)  # small pause so the table can refresh
-
-"""
-def extract_periods(driver):
-    period_headers = driver.find_elements(
-        By.CSS_SELECTOR,
-        "table thead th.tableHeader-DS-unknown1-1"
-    )
-
-    periods = []
-    for th in period_headers:
-        t = th.get_attribute("title") or th.text.strip()
-        if t:
-            periods.append(t)
-    return periods
-"""
 
 def extract_periods(driver, wait: WebDriverWait) -> list[str]:
     """
@@ -147,50 +95,6 @@ def extract_periods(driver, wait: WebDriverWait) -> list[str]:
             periods.append(value)
 
     return periods
-
-"""
-def extract_financial_table(driver, periods):
-    rows_data = {}
-
-    for row in driver.find_elements(By.CSS_SELECTOR, "tbody tr"):
-        name_cells = row.find_elements(By.CSS_SELECTOR, "td:first-child div")
-        if not name_cells:
-            continue
-
-        raw_name = name_cells[0].text.strip()
-        if not raw_name:
-            continue
-
-        metric_name = raw_name.splitlines()[0].strip()
-
-        # Data columns
-        value_divs = row.find_elements(By.CSS_SELECTOR, "td:not(:first-child) > div")
-        raw_values = [v.text.strip() for v in value_divs if v.text.strip()]
-
-        if not raw_values:
-            # fallback: maybe values directly in <td>
-            tds = row.find_elements(By.CSS_SELECTOR, "td:not(:first-child)")
-            raw_values = [td.text.strip() for td in tds if td.text.strip()]
-
-        if not raw_values:
-            continue
-
-        # Pattern logic
-        if len(raw_values) == len(periods):
-            values = raw_values
-        elif len(raw_values) == 2 * len(periods):
-            values = raw_values[0::2]     # strip YoY column
-        else:
-            values = raw_values[:len(periods)]
-
-        # Normalize
-        if len(values) < len(periods):
-            values += [""] * (len(periods) - len(values))
-
-        rows_data[metric_name] = dict(zip(periods, values))
-
-    return rows_data
-"""
 
 def extract_financial_table(driver, periods):
     rows_data = {}
@@ -277,47 +181,6 @@ def scrape_cash_flow(driver):
     periods = extract_periods(driver, wait)
     table = extract_financial_table(driver, periods)
     return periods, table
-
-"""
-# FOR ONLY ONE COMPANY
-def scrape_bing_financials(ticker: str):
-    driver = webdriver.Edge()
-    url = f"https://www.bing.com/search?q={ticker}"
-    driver.get(url)
-    wait = WebDriverWait(driver, 20)
-
-    # Wait for the tab bar
-    tabs = wait.until(
-        EC.presence_of_element_located(
-            (By.CSS_SELECTOR, "div.fin_l3tc")
-        )
-    )
-
-    # Find the <a title="Financials">
-    financials_btn = tabs.find_element(
-        By.CSS_SELECTOR,
-        "a.fin_l3tab[title='Financials']"
-    )
-
-    driver.execute_script("arguments[0].click();", financials_btn)
-    time.sleep(1.0)
-
-    # -------- scrape all tabs -------
-    income_periods, income = scrape_income_statement(driver)
-    bs_periods, balance_sheet = scrape_balance_sheet(driver)
-    cf_periods, cash_flow = scrape_cash_flow(driver)
-
-    driver.quit()
-
-    return {
-        "periods": income_periods,  # all tabs use the same periods
-        "income_statement": income,
-        "balance_sheet": balance_sheet,
-        "cash_flow": cash_flow
-    }
-"""
-
-
 
 
 def scrape_bing_financials_for_driver(driver, wait: WebDriverWait, ticker: str) -> dict:
@@ -461,7 +324,7 @@ def main():
     data = json.loads(companies_path.read_text(encoding="utf-8"))
 
     # Extract tickers as a flat list
-    tickers = [c["ticker"] for c in data.get("companies", [])][:1000]
+    tickers = [c["ticker"] for c in data.get("companies", [])][198:278]
 
     out_path = scrape_many_tickers_and_save(tickers)
 

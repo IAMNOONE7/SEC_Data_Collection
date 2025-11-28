@@ -49,6 +49,8 @@ companies.json
 comparison_output/
 *.csv
 *.json
+*.txt
+data/
 
 # Logs
 *.log
