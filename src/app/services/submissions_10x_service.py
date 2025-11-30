@@ -16,11 +16,29 @@ ALLOWED_FORMS_10X: Set[str] = {
     "10-Q/A",
 }
 
+############################################################
+# Overview
+#
+# This module works with the SEC submissions to:
+#
+#   - Represent 10-K / 10-Q filings as a Filing10X.
+#   - Fetch all recent 10-K / 10-Q for a company using its CIK.
+#   - Batch-fetch filings for many companies, skipping ones that fail.
+#   - Detect companies that appear to be missing expected 10-Q filings
+#     in the last N years (by simple count).
+#   - Merge newly discovered filings into an existing JSON-style payload
+#     without creating duplicates.
+#
+# It’s intentionally focused on the 10-K and 10-Q only.
+# You know every Filing10X here is “a major periodic report”.
+############################################################
 
 @dataclass(frozen=True)
 class Filing10X:
     """
-    Represents one 10-K / 10-Q (or amendment) filing for a company.
+    Represents one 10-K / 10-Q filing for a company.
+
+    frozen=True -> instances are immutable (hashable, safe to use in sets)
     """
     ticker: str
     cik: str
@@ -37,17 +55,18 @@ def _parse_recent_filings_10x(
     since: dt.date,
 ) -> List[Filing10X]:
     """
-    Parse the 'filings.recent' section of the submissions JSON and return
-    all 10-K / 10-Q (and amendments) strictly after the given date.
+    Parse the filings.recent section of the submissions JSON and return
+    all 10-K/10-Q after the given date.
     """
     filings = submissions_json.get("filings", {})
     recent = filings.get("recent", {})
-
+    # SEC returns parallel arrays
     forms: Sequence[str] = recent.get("form", [])
     accession_numbers: Sequence[str] = recent.get("accessionNumber", [])
     primary_documents: Sequence[str] = recent.get("primaryDocument", [])
     filing_dates: Sequence[str] = recent.get("filingDate", [])
 
+    # How many complete rows we can safely parse
     n = min(len(forms), len(accession_numbers), len(primary_documents), len(filing_dates))
     if n == 0:
         return []
@@ -57,6 +76,7 @@ def _parse_recent_filings_10x(
     for i in range(n):
         form = forms[i]
         if form not in ALLOWED_FORMS_10X:
+            # Ignore everything outside the 10-K/10-Q
             continue
 
         date_str = filing_dates[i]
@@ -92,8 +112,8 @@ def fetch_10x_for_company(
     since: dt.date,
 ) -> List[Filing10X]:
     """
-    Fetch and parse all 10-K / 10-Q filings for a single company,
-    strictly after the given 'since' date, using the submissions API.
+    Fetch and parse all 10-K/10-Q filings for a single company,
+    after the given 'since' date
     """
     submissions = client.fetch_submissions_json(cik)
     return _parse_recent_filings_10x(submissions, cik=cik, ticker=ticker, since=since)
@@ -106,10 +126,6 @@ def fetch_10x_for_companies(
 ) -> List[Filing10X]:
     """
     Fetch all 10-K / 10-Q filings for a list of (ticker, cik) pairs.
-
-    - Is resilient to per-company errors (skips on failure).
-    - Relies on SecClient's throttling and backoff for HTTP politeness.
-
     Returns a flat list of Filing10X objects.
     """
     results: List[Filing10X] = []
@@ -132,9 +148,6 @@ def detect_missing_10q_filings(
 ) -> Dict[str, List[int]]:
     """
     Detect which companies are missing expected 10-Q filings.
-
-    Returns:
-        {ticker: [list_of_years_with_missing_10Q]}
     """
     from collections import defaultdict
 
@@ -143,7 +156,7 @@ def detect_missing_10q_filings(
     now = dt.date.today()
     start_year = now.year - years_back
 
-    # group filings by ticker -> year -> count
+    # counts[ticker][year] -> number of 10-Q filings
     counts = defaultdict(lambda: defaultdict(int))
 
     for f in filings:
@@ -157,7 +170,7 @@ def detect_missing_10q_filings(
     for ticker, years in counts.items():
         missing_years = []
         for y in range(start_year, now.year + 1):
-            expected = 3  # SEC: firms file 3 × 10-Q + 1 × 10-K per year
+            expected = 3  # typical pattern: 3 × 10-Q + 1 × 10-K per full year
             actual = years.get(y, 0)
             if actual < expected:
                 missing_years.append(y)
@@ -170,7 +183,6 @@ def detect_missing_10q_filings(
 def serialize_filing_10x(f: Filing10X) -> Dict[str, Any]:
     """
     Convert Filing10X dataclass to a JSON-serializable dict.
-    Ensures filing_date is an ISO string.
     """
     return {
         **asdict(f),
@@ -184,10 +196,8 @@ def merge_filings_into_payload(
 ) -> tuple[Dict[str, Any], int]:
 
     """ 
-    Merge new Filing10X objects into an existing JSON payload.
-
+    Merge new Filing10X objects into an existing JSON.
     Deduplicates by (ticker, accession_number).
-
     existing_payload is expected to have:
       {
         "as_of": "...",
@@ -210,6 +220,7 @@ def merge_filings_into_payload(
     for f in new_filings:
         key = (f.ticker, f.accession_number)
         if key in existing_keys:
+            # Already present, skip duplicate.
             continue
         filings_list.append(serialize_filing_10x(f))
         existing_keys.add(key)

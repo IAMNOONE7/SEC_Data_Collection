@@ -1,6 +1,4 @@
-# backend/src/app/clients/sec_client.py
 from __future__ import annotations
-
 import datetime as dt
 import gzip
 import io
@@ -20,9 +18,40 @@ _REFERER = os.getenv("SEC_REFERER", "https://github.com/your/repo")
 _REQ_TIMEOUT = int(os.getenv("SEC_REQ_TIMEOUT", "30"))
 _BACKOFFS = [0.5, 1.0, 2.0, 4.0]  # seconds
 _MIN_DELAY_BETWEEN_CALLS = float(os.getenv("SEC_MIN_DELAY_S", "0.2"))  # gentle pacing
-
 _last_call = 0.0
 
+########################################################################################################################
+# Overview
+#
+# This module implements a lightweight SEC/EDGAR client
+# with built-in throttling, retry logic, and helpers
+# for working with SEC filings.
+#
+# Key responsibilities:
+#
+# 1. **Rate-Limited HTTP Client**
+#    - Uses a shared `_throttle()` to ensure we never hit SEC too fast.
+#    - Centralized `_get()` ensures all requests behave consistently.
+#
+# 2. **Daily Index Support (Legacy)**
+#    - Can fetch SEC’s old daily master index files.
+#
+# 3. **Submissions JSON API (Primary path)**
+#    - Fetches modern per-company JSON filings using CIK numbers.
+#
+# 4. **Filing Discovery Helpers**
+#    - For a given accession number, parses the `*-index-headers.html`
+#      page to locate the main XML and HTML filing documents.
+#
+# 5. **Utility Routines**
+#    - Small helpers to format accession numbers (add dashes),
+#      and to fetch arbitrary text via the same safe HTTP path.
+#
+# In short:
+# The `SecClient` class provides a polite way to talk to
+# the SEC website, with convenience tools to go from a CIK or index
+# entry → to full filing URLs (XML/HTML) → to usable content.
+########################################################################################################################
 
 def _throttle() -> None:
     """
@@ -37,14 +66,13 @@ def _throttle() -> None:
 
 
 def quarter_of(month: int) -> int:
-    return (month - 1) // 3 + 1
+    return (month - 1) // 3 + 1 #SEC quarter (1-4)
 
 
 def build_daily_index_urls(date: dt.date) -> List[str]:
     """
-    Build URLs for the EDGAR daily master index (text and gzip).
-    We keep this for backwards compatibility, but for 10-K/10-Q we will use the
-    submissions JSON API instead.
+    This is kept for backwards compatibility
+    EDGAR daily master index
     """
     y, q = date.year, quarter_of(date.month)
     ymd = date.strftime("%Y%m%d")
@@ -54,10 +82,10 @@ def build_daily_index_urls(date: dt.date) -> List[str]:
 
 class SecClient:
     """
-    Thin HTTP client for SEC/EDGAR with:
-    - polite headers (User-Agent, Referer)
-    - throttling
-    - exponential backoff on 429/5xx
+    Core SEC HTTP client
+     - adds the right headers once
+     - centralizes retry
+     - reuses a single session for connection pooling
     """
 
     def __init__(self, session: Optional[requests.Session] = None) -> None:
@@ -70,7 +98,8 @@ class SecClient:
             }
         )
 
-    # ---- resilient GET with backoff + gentle throttling
+    # All HTTP traffic to SEC should go through this method so we have
+    # a single place to tweak rate limits and retry behavior.
     def _get(self, url: str) -> requests.Response:
         for i, backoff in enumerate([0.0] + _BACKOFFS):
             _throttle()
@@ -111,17 +140,15 @@ class SecClient:
         return None
 
     # ---------------------------------------------------------------------
-    # 2) Submissions JSON API (NEW, used for per-company 10-K/10-Q)
+    # 2) Submissions JSON API (used for per-company 10-K/10-Q)
     # ---------------------------------------------------------------------
     def fetch_submissions_json(self, cik: str) -> Dict[str, Any]:
         """
-        Fetch the SEC submissions JSON for a single company (by CIK).
+        Fetch the SEC submissions JSON for a single company.
 
         Uses:
-            https://data.sec.gov/submissions/CIK##########.json
+                https://data.sec.gov/submissions/CIK##########.json
 
-        cik can be padded ("0000320193") or unpadded ("320193");
-        we normalize to 10-digit padded.
         """
         cik_padded = str(int(cik)).zfill(10)
         url = f"https://data.sec.gov/submissions/CIK{cik_padded}.json"
@@ -138,6 +165,7 @@ class SecClient:
         Given a CIK and an accession number with dashes, locate the primary
         XML and HTML filing URLs under the /Archives/edgar/data/... directory.
         """
+        # SEC folder path uses unpadded CIK plus accession without dashes.
         cik_num = str(int(cik))  # unpadded
         accession_number = accession_dash.replace("-", "")
         base_dir = f"{_SEC_BASE}/Archives/edgar/data/{cik_num}/{accession_number}/"
@@ -146,12 +174,18 @@ class SecClient:
         r = self._get(url)
         content = r.text
 
-        # isolate <TEXT>...</TEXT> (case-insensitive) if present
+        # If <TEXT>...</TEXT> wrapping is present, narrow the soup to that section.
+        # This reduces noise from the rest of the HTML.
         m = re.search(r"<TEXT\b[^>]*>(.*?)</TEXT>", content, flags=re.I | re.S)
         fragment = m.group(1) if m else content
 
         soup = BeautifulSoup(fragment, "html.parser")
         xml_url = html_url = None
+
+        # Strategy:
+        # - Iterate over all <a> tags.
+        # - Use the link text to detect *.xml and *.htm(l).
+        # - Build absolute URLs, bail out once we have both.
         for a in soup.find_all("a", href=True):
             href = a["href"].strip()
             abs_url = urljoin(url, href)

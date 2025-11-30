@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 import datetime as dt
 import json
@@ -9,8 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import sys
 import xml.etree.ElementTree as ET
 from dotenv import load_dotenv
-from typing import DefaultDict
-import statistics
 
 # ticker -> bing_metric -> sec_concept -> list[relative_error]
 
@@ -30,17 +27,57 @@ from src.app.services.xbrl_company_totals_service import (  # type: ignore
     print_by_context,
 )
 EvidenceType = Dict[str, Dict[str, Dict[str, List[float]]]]
+
+############################################################
+# Overview
+#
+# This script is a top-level tool to learn a mapping between:
+#
+#   Bing scraped metrics  <->  SEC XBRL concepts
+#
+# for each company (ticker).
+#
+# Idea:
+#   - For many 10-Q filings:
+#       - Download the XBRL instance from EDGAR
+#       - Extract company-wide totals for the main reporting period
+#       - Load the matching quarter from our Bing financials JSON
+#       - Compare SEC vs Bing numbers and collect "evidence" whenever
+#         two values match within some tolerance
+#
+#   - After looping all filings, the accumulated evidence lets us
+#     infer, per ticker, which Bing metric name most likely corresponds
+#     to which SEC concept (e.g. "Total revenue" = "us-gaap:Revenues").
+#
+# Why this exists:
+#   Every company uses slightly different naming conventions on Bing,
+#   and XBRL tagging is flexible. This code is a practical, data-driven
+#   way to figure out "what means what" per company, not an elegant
+#   universal solution. It relies on numeric alignment, not semantics.
+#
+#   - It works as of today (11/30/2025), but may break if either side changes
+#     their format or conventions.
+############################################################
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def load_submissions_json(path: Path) -> Dict[str, Any]:
+    """
+    Load the aggregated 10x_submissions.json file (master 10-K/10-Q dataset).
+    """
     if not path.exists():
         raise FileNotFoundError(f"Submissions file not found at {path}")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def pick_10q_filings(payload: Dict[str, Any], limit: int = 10) -> List[Filing10X]:
+    """
+    From the master submissions payload, pick up to `limit` 10-Q filings
+    and convert them into Filing10X objects.
+
+    This is our working set for building the Bing–SEC mapping.
+    """
     filings = payload.get("filings", [])
     out = []
 
@@ -73,7 +110,9 @@ def pick_10q_filings(payload: Dict[str, Any], limit: int = 10) -> List[Filing10X
 
 
 def _local_name(tag: str) -> str:
-    """'{ns}Name' -> 'Name'."""
+    """
+    '{ns}Name' -> 'Name'.
+    """
     if tag.startswith("{"):
         return tag.split("}", 1)[1]
     return tag
@@ -88,16 +127,12 @@ def build_company_sec_mapping(
 
     Less strict version:
       - For each (ticker, bing_metric) we compute stats per SEC concept:
-          * hits = number of quarters where we saw that match
-          * mean_err = average relative error
+          - hits = number of quarters where we saw that match
+          - mean_err = average relative error
       - We PREFER candidates with hits >= min_hits and mean_err <= max_mean_err.
-      - BUT if *none* satisfy these thresholds, we still keep the best candidate
+      - BUT if none satisfy these thresholds, we still keep the best candidate
         overall (highest hits, then lowest mean_err).
 
-    'evidence' structure:
-        evidence[ticker][bing_metric][sec_concept] = list of:
-            - either floats (rel_err),
-            - or dicts containing at least {"rel_err": <float>, ...}.
     """
     mapping: Dict[str, Dict[str, str]] = {}
 
@@ -114,10 +149,10 @@ def build_company_sec_mapping(
                 # hits can be a list of floats or list of dicts with "rel_err"
                 first = hits[0]
                 if isinstance(first, dict):
-                    # list of dicts → use h["rel_err"]
+                    # list of dicts -> use h["rel_err"]
                     errs = [float(h.get("rel_err", 0.0)) for h in hits]
                 else:
-                    # list of floats (or numbers) → use directly
+                    # list of floats (or numbers) -> use directly
                     errs = [float(h) for h in hits]
 
                 if not errs:
@@ -239,9 +274,15 @@ def parse_sec_number(s: str) -> Optional[float]:
 
 def build_sec_numeric_map(rows: List[Any]) -> Dict[str, float]:
     out: Dict[str, float] = {}
+    """
+    Build mapping: SEC_concept -> numeric_value from FactRow-like objects.
 
+    Works with:
+      - dicts containing "value" and "concept"
+      - dataclass/objects with .value and .concept attributes
+    """
     for r in rows:
-        # --- get value as string ---
+        # get value as string
         if isinstance(r, dict):
             val_str = str(r.get("value", "")).strip()
             concept = str(r.get("concept", "")).strip()
@@ -296,10 +337,6 @@ def get_bing_all_metrics(bing: Dict[str, Any]) -> Tuple[List[str], Dict[str, Dic
           "Free Cash Flow": {...},
           ...
         }
-
-    If a metric name appears in multiple statements, we suffix it with
-    ' (income_statement)' / ' (balance_sheet)' / ' (cash_flow)' so that
-    keys stay unique.
     """
     periods = get_bing_periods(bing)
     merged: Dict[str, Dict[str, str]] = {}
@@ -337,7 +374,7 @@ def get_bing_all_metrics(bing: Dict[str, Any]) -> Tuple[List[str], Dict[str, Dic
 
 def pick_bing_period_index(periods: List[str], fiscal_year: str, fiscal_period: str) -> Optional[int]:
     """
-    MSN uses labels like 'Jul 2025 (FQ3)'.
+    MSN uses labels like Jul 2025 (FQ3).
     We have DocumentFiscalYearFocus='2025' and DocumentFiscalPeriodFocus='Q3'.
     So we look for a label that ends with '2025 (FQ3)'.
     """
@@ -462,6 +499,7 @@ def compare_sec_with_bing(
 
     bing_col_values = build_bing_column_values(periods, metrics, p_idx)
     sec_map = build_sec_numeric_map(rows)
+    # Sort SEC concepts by absolute value, largest first (most informative)
     sec_items = sorted(sec_map.items(), key=lambda kv: abs(kv[1]), reverse=True)
     all_matches: List[Tuple[float, str, float, str, float]] = []
 
@@ -472,7 +510,7 @@ def compare_sec_with_bing(
         for mname, bval, err in matches:
             all_matches.append((err, concept, sec_val, mname, bval))
 
-    # === Sort by lowest relative error ===
+    # Sort by lowest relative error
     all_matches.sort(key=lambda x: x[0])
 
     if evidence is not None:
@@ -516,6 +554,7 @@ def main() -> int:
     out_dir = BACKEND_ROOT / "data" / "sec_bing_compare"
     out_dir.mkdir(parents=True, exist_ok=True)
     txt_path = out_dir / f"compare_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    # Global evidence accumulator across all filings and tickers
     evidence: EvidenceType = {}
     total = len(filings)
     with txt_path.open("w", encoding="utf-8") as fout:
@@ -568,14 +607,13 @@ def main() -> int:
                 fout.write("\n")
 
             except Exception as exc:
-                # ------------------------------------------------------
-                # Protects the entire loop from crashing
-                # ------------------------------------------------------
+                # Protect the main loop so one bad filing doesn't kill the run.
                 logging.exception("Error processing %s %s", ticker, filing.form)
                 fout.write(f"ERROR processing {ticker}: {exc}\n")
                 fout.write("Skipping this filing.\n\n")
                 continue
 
+    # After processing all filings, build the final per-ticker mapping
     mapping = build_company_sec_mapping(
         evidence,
         min_hits=1,  # require at least 2 quarters

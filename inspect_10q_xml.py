@@ -25,13 +25,36 @@ from src.app.services.xbrl_company_totals_service import (  # type: ignore
     print_by_context,
 )
 
+############################################################
+# Overview
+#
+# Top-level script for:
+#   - Picking a 10-Q filing from the aggregated 10x_submissions.json
+#   - Finding the associated XBRL instance document on EDGAR
+#   - Saving that raw XBRL instance to disk
+#   - Parsing it and extracting company-wide consolidated totals
+#   - Printing facts grouped by context for manual inspection
+#
+# In other words:
+#   This is a “playground/inspection” tool to poke at real XBRL data
+#   for one filing and see what the extraction logic actually produces.
+############################################################
 
 def load_submissions_json(path: Path) -> Dict[str, Any]:
+    """
+    Load the aggregated 10x_submissions.json file (master 10-K/10-Q dataset).
+    """
     if not path.exists():
         raise FileNotFoundError(f"Submissions file not found at {path}")
     return json.loads(path.read_text(encoding="utf-8"))
 
 def pick_first_10q(payload: Dict[str, Any]) -> Filing10X:
+    """
+    Pick the first 10-Q filing and convert it into a Filing10X object.
+
+    This is intentionally simple: it's just a quick way to grab a real-world
+    example filing for XBRL inspection and debugging.
+    """
     filings: List[Dict[str, Any]] = payload.get("filings", [])
     for f in filings:
         form = f.get("form") or f.get("form_type")

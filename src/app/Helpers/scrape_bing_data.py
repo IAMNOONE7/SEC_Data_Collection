@@ -1,4 +1,3 @@
-import time
 from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -7,16 +6,48 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 import logging
 import json
-from datetime import datetime
 import time
 from pathlib import Path
 
-BACKEND_ROOT = Path(__file__).resolve().parents[3]  # adjust if needed
+BACKEND_ROOT = Path(__file__).resolve().parents[3]
+
+############################################################
+# Since there is no stable API, scraping was the only way to
+# consistently discover how each company names its Income
+# Statement, Balance Sheet, and Cash Flow items.
+#
+# I am fully aware that this is not the most elegant or
+# future-proof solution. This scraper is primarily a
+# practical engineering tool to extract the naming
+# conventions I need for later processing and normalization.
+#
+# IMPORTANT:
+#   - The scraper depends heavily on MSN/Bing’s current HTML
+#     structure and CSS selectors.
+#   - It works today (11/30/2025), but it may break if
+#     Microsoft updates the UI or changes class names.
+#============================================================
+# Overview
+#
+# This module uses Selenium to scrape quarterly financial
+# statements (Income Statement, Balance Sheet, Cash Flow)
+# from MSN/Bing for a list of tickers.
+#
+# Main responsibilities:
+#   - Drive an Edge browser instance and navigate to MSN Money.
+#   - Close privacy / install popups that can block the UI.
+#   - Switch between Financials tabs (Income, Balance, Cash Flow)
+#     and force the "Quarterly" view.
+#   - Parse the financial tables into a structured dict
+#   - Save each ticker’s data to its own JSON file in:
+#       backend/data/bing_financials/<TICKER>.json
+#   - Handle per-ticker failures by restarting the WebDriver
+#     so that one broken page doesn’t kill the whole batch.
+############################################################
 
 def close_privacy_and_popups(driver):
     try:
-        # --- PRIVACY CONSENT BOX -----------------------------------------
-        # Buttons: "I Accept", "Reject All", "Manage Preferences"
+        # PRIVACY CONSENT BOX
         buttons = driver.find_elements(By.CSS_SELECTOR, "button")
         for btn in buttons:
             label = btn.text.strip().lower()
@@ -32,13 +63,12 @@ def close_privacy_and_popups(driver):
         pass
 
     try:
-        # --- MSN MONEY INSTALL POPUP -------------------------------------
-        # Close button is usually: <button aria-label="Close">×</button>
+        # --- MSN MONEY INSTALL POPUP
         close_btns = driver.find_elements(By.CSS_SELECTOR, "button[aria-label='Close']")
         for c in close_btns:
             try:
                 c.click()
-                print("✔ Install popup closed.")
+                print("Install popup closed.")
                 time.sleep(0.5)
                 break
             except:
@@ -48,7 +78,7 @@ def close_privacy_and_popups(driver):
 
 def _ensure_quarterly_view(driver, wait: WebDriverWait) -> None:
     """
-    Make sure the 'Quarterly' toggle is active for the current Financials tab.
+    Make sure the 'Quarterly' toggle is active.
     Works across Income Statement, Balance Sheet, Cash Flow.
     """
     try:
@@ -62,7 +92,7 @@ def _ensure_quarterly_view(driver, wait: WebDriverWait) -> None:
         logging.warning("Could not find Quarterly toggle – staying in current view.")
         return
 
-    # If you want to avoid unnecessary clicks, you can check its classes:
+    # Small optimization: only click if it's not already the selected view.
     classes = quarterly_btn.get_attribute("class") or ""
     if "selected" not in classes.lower():
         quarterly_btn.click()
@@ -71,7 +101,7 @@ def _ensure_quarterly_view(driver, wait: WebDriverWait) -> None:
 def extract_periods(driver, wait: WebDriverWait) -> list[str]:
     """
     Extract period labels from the Financials table header
-    (e.g. 'Oct 2025 (FQ4)', 'Jul 2025 (FQ3)', ...).
+    ('Oct 2025 (FQ4)', 'Jul 2025 (FQ3)', ...).
     """
     # wait until some table header row exists
     header_row = wait.until(
@@ -90,6 +120,7 @@ def extract_periods(driver, wait: WebDriverWait) -> list[str]:
     for th in header_cells:
         title = (th.get_attribute("title") or "").strip()
         text  = th.text.strip()
+        # Prefer the title attribute if present; otherwise fall back to visible text.
         value = title or text
         if value:
             periods.append(value)
@@ -97,11 +128,14 @@ def extract_periods(driver, wait: WebDriverWait) -> list[str]:
     return periods
 
 def extract_financial_table(driver, periods):
+    """
+    Parse the currently visible financials table into a nested dict.
+    """
     rows_data = {}
 
     for row in driver.find_elements(By.CSS_SELECTOR, "tbody tr"):
 
-        # --- Extract metric name ---
+        # Extract metric name
         name_td = row.find_elements(By.CSS_SELECTOR, "td:first-child")
         if not name_td:
             continue
@@ -110,33 +144,34 @@ def extract_financial_table(driver, periods):
         if not name_raw:
             continue
 
+        # Some rows might contain multiple lines; we only take the first line as label.
         metric_name = name_raw.splitlines()[0].strip()
 
-        # --- Extract values from data cells ---
+        # Extract values from data cells
         data_tds = row.find_elements(By.CSS_SELECTOR, "td:not(:first-child)")
 
         values = []
         for td in data_tds:
-
-            # Check for inner <div>s
+            # Some cells wrap the value in nested <div>s.
             divs = td.find_elements(By.TAG_NAME, "div")
 
             if len(divs) >= 1:
                 # Value is always first <div>
                 val = divs[0].text.strip()
             else:
-                # No divs → pure value inside <td>
+                # No divs -> pure value inside <td>
                 val = td.text.strip()
 
             values.append(val)
 
-        # Remove empty tail values
+        # Remove empty values
         values = [v for v in values if v != ""]
 
         if not values:
+            # Empty row
             continue
 
-        # --- Normalize to period count ---
+        # Normalize length to match period count
         if len(values) > len(periods):
             values = values[:len(periods)]
         elif len(values) < len(periods):
@@ -147,6 +182,9 @@ def extract_financial_table(driver, periods):
     return rows_data
 
 def scrape_income_statement(driver):
+    """
+    Navigate to Income Statement tab, ensure quarterly view, and scrape the table.
+    """
     button = driver.find_element(By.CSS_SELECTOR, 'button[title="Income Statement"]')
     driver.execute_script("arguments[0].click();", button)
 
@@ -160,6 +198,9 @@ def scrape_income_statement(driver):
     return periods, table
 
 def scrape_balance_sheet(driver):
+    """
+    Same as scrape_income_statement, but for the Balance Sheet tab.
+    """
     button = driver.find_element(By.CSS_SELECTOR, 'button[title="Balance Sheet"]')
     driver.execute_script("arguments[0].click();", button)
     wait = WebDriverWait(driver, 20)
@@ -172,6 +213,9 @@ def scrape_balance_sheet(driver):
     return periods, table
 
 def scrape_cash_flow(driver):
+    """
+    Same as scrape_income_statement, but for the Cash Flow tab.
+    """
     button = driver.find_element(By.CSS_SELECTOR, 'button[title="Cash Flow"]')
     driver.execute_script("arguments[0].click();", button)
     wait = WebDriverWait(driver, 20)
@@ -185,12 +229,16 @@ def scrape_cash_flow(driver):
 
 def scrape_bing_financials_for_driver(driver, wait: WebDriverWait, ticker: str) -> dict:
     """
-    Core scraper: assumes driver + wait already exist and are reused.
-    Scrapes Income Statement, Balance Sheet and Cash Flow (Quarterly) for one ticker.
+    Core scraper: assumes driver + wait are already initialized and reused.
+
+    For a single ticker:
+      - focuses the MSN Money search box,
+      - searches for the ticker,
+      - opens the Financials tab,
+      - scrapes Income Statement, Balance Sheet, and Cash Flow in Quarterly view.
     """
-    #url = f"https://www.bing.com/search?q={ticker}"
-    #driver.get(url)
     close_privacy_and_popups(driver)
+    # Locate the main search input inside the top bar.
     search_input = wait.until(
         EC.element_to_be_clickable(
             (
@@ -200,10 +248,10 @@ def scrape_bing_financials_for_driver(driver, wait: WebDriverWait, ticker: str) 
         )
     )
 
-    # 3) Type ticker and submit
+    # Type ticker and submit
     search_input.clear()
     search_input.send_keys(ticker)
-    time.sleep(0.5)  # tiny pause to let autosuggest appear (optional)
+    time.sleep(0.5)  # tiny pause to let autosuggest appear
 
     # simplest: just press ENTER
     search_input.send_keys(Keys.RETURN)
@@ -246,6 +294,10 @@ def scrape_many_tickers_and_save(tickers: list[str]) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def init_driver():
+        """
+        Initialize WebDriver + WebDriverWait, navigate to MSN Money,
+        and close early popups.
+        """
         d = webdriver.Edge()
         w = WebDriverWait(d, 20)
         d.get("https://www.msn.com/en-US/money?id=a6qja2")
@@ -288,7 +340,7 @@ def scrape_many_tickers_and_save(tickers: list[str]) -> None:
                 logging.exception("Ticker %s FAILED even after restart — skipping", ticker)
                 continue   # go to next ticker
 
-        # --- success → save per ticker ---
+        # success -> save per ticker
         ticker_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         logging.info("Saved %s → %s", ticker, ticker_path.name)
 
@@ -305,6 +357,10 @@ def scrape_many_tickers_and_save(tickers: list[str]) -> None:
 
 
 def print_metrics(metric_dict: dict, periods: list[str]):
+    """
+    Helper to pretty-print a metric dict with
+    Useful for debugging
+    """
     print("Metric".ljust(30), " | ", " | ".join(periods))
     print("-" * 120)
 
@@ -328,6 +384,11 @@ def main():
 
     out_path = scrape_many_tickers_and_save(tickers)
 
+    # The code below assumes a single JSON file keyed by ticker,
+    # which is no longer true with the per-ticker file strategy.
+    # Keeping it here as a reminder / template for future quick checks.
+
+    """
     print("\nSaved Bing financials to:")
     print(f"  {out_path}")
     print("\nQuick check (first ticker):")
@@ -337,7 +398,7 @@ def main():
     print(f"Ticker: {first}")
     print("Periods:", data["periods"])
     print("Income statement metrics:", list(data["income_statement"].keys())[:10])
-
+    """
     return 0
 
 

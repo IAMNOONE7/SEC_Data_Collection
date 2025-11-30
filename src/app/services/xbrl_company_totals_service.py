@@ -1,35 +1,3 @@
-"""
-xbrl_company_totals_service.py
---------------------------------
-
-This module provides tools for parsing SEC XBRL **instance documents** for 10-Q/10-K filings
-and extracting *company-level consolidated totals*.
-
-XBRL filings include hundreds–thousands of "facts". Each fact belongs to a “context”
-that determines:
-
-  • The reporting period (startDate/endDate or instant)
-  • Dimensional qualifiers (“segments”), e.g.:
-        - us-gaap:StatementBusinessSegmentsAxis
-        - srt:ProductOrServiceAxis
-        - srt:ConsolidationItemsAxis
-
-To retrieve *consolidated company totals*, we typically must:
-
-  - Select contexts WITHOUT any dimensions
-    (because dimensions break totals into segments)
-
-  - Match the context's end/instant date to dei:DocumentPeriodEndDate
-    (the primary period for the filing)
-
-This module handles all the above and outputs clean FactRow objects.
-
-You will most commonly use:
-    parse_contexts()
-    extract_company_totals_for_main_period()
-    print_by_context()   (debug helper)
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -55,57 +23,59 @@ NS_ALIASES: Dict[str, str] = {
     "http://www.xbrl.org/2003/instance": "xbrl",
 }
 
+############################################################
+# Overview
+#
+# This module extracts company-wide consolidated totals from
+# SEC XBRL instance documents (10-Q / 10-K).
+#
+# XBRL filings contain many contexts (periods, segments, products,
+# geographies, ...). To get clean consolidated totals
+# (Revenue, Net Income, Assets…), we must:
+#
+#   - Parse all <context> definitions
+#   - Keep only contexts with no dimensions (true consolidated data)
+#   - Match the context’s endDate/instant to the filing’s
+#     dei:DocumentPeriodEndDate (the main reporting period)
+#   - Collect only facts tied to those contexts
+#
+# This module does exactly that and outputs simple FactRow objects
+# for downstream processing.
+#
+# Main functions:
+#   parse_contexts()
+#   extract_company_totals_for_main_period()
+#   print_by_context()   # debug helper
+############################################################
+
 
 @dataclass
 class ContextInfo:
     """
-    Represents one <xbrli:context> in the XBRL instance.
+    Represents a single <xbrli:context>.
 
-    A context determines:
-        • Reporting period (start/end OR instant)
-        • Dimensional breakdown (if present)
-        • Entity (CIK is always the same in SEC filings)
-
-    Example context:
-
-        <context id="c-3">
-            <entity>
-                <identifier>0001234567</identifier>
-                <segment>
-                    <xbrldi:explicitMember dimension="srt:ProductOrServiceAxis">
-                        us-gaap:ProductMember
-                    </xbrldi:explicitMember>
-                </segment>
-            </entity>
-            <period>
-                <startDate>2025-05-01</startDate>
-                <endDate>2025-07-31</endDate>
-            </period>
-        </context>
+    Contains:
+        - period (start/end or instant)
+        - dimensional qualifiers (optional)
+        - unique context id
     """
     id: str
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     instant: Optional[date] = None
-    # dimension -> member, e.g. "srt:ProductOrServiceAxis" -> "us-gaap:ServiceOtherMember"
     dims: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class FactRow:
     """
-       Represents one flattened XBRL fact.
-
-       Example:
-           us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax
-           value=1230000000
-           context=c-11
-           period_end=2025-07-31
-       """
+    Represents a single extracted fact belonging to a
+    consolidated main-period context.
+    """
     ticker: str
     filing_date: date
     context_id: str
-    concept: str          # e.g. "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+    concept: str          # "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
     value: str
     period_start: Optional[date]
     period_end: Optional[date]
@@ -131,10 +101,11 @@ def _parse_date(d: Optional[str]) -> Optional[date]:
 
 def parse_contexts(root: ET.Element) -> Dict[str, ContextInfo]:
     """
-    Build a mapping context_id -> ContextInfo from <xbrli:context> elements.
+    Read all <xbrli:context> elements and convert them to ContextInfo.
     """
     contexts: Dict[str, ContextInfo] = {}
 
+    # Find every context in the instance document.
     for ctx in root.findall(f".//{{{XBRLI_NS}}}context"):
         ctx_id = ctx.attrib.get("id")
         if not ctx_id:
@@ -142,25 +113,27 @@ def parse_contexts(root: ET.Element) -> Dict[str, ContextInfo]:
 
         info = ContextInfo(id=ctx_id)
 
-        # --- period ---
+        # period
         period = ctx.find(f"{{{XBRLI_NS}}}period")
         if period is not None:
             start_el = period.find(f"{{{XBRLI_NS}}}startDate")
             end_el = period.find(f"{{{XBRLI_NS}}}endDate")
             inst_el = period.find(f"{{{XBRLI_NS}}}instant")
 
+            # Instance period (single-day fact)
             if inst_el is not None:
                 info.instant = _parse_date(inst_el.text)
+            # Duration period (start/end)
             else:
                 info.start_date = _parse_date(start_el.text if start_el is not None else None)
                 info.end_date = _parse_date(end_el.text if end_el is not None else None)
 
-        # --- dimensions (/entity/segment/explicitMember) ---
+        # dimensions (/entity/segment/explicitMember)
         segment = ctx.find(f"{{{XBRLI_NS}}}entity/{{{XBRLI_NS}}}segment")
         if segment is not None:
             for mem in segment.findall(f".//{{{XBRLDI_NS}}}explicitMember"):
-                dim = mem.attrib.get("dimension")  # e.g. "srt:ProductOrServiceAxis"
-                member = (mem.text or "").strip()  # e.g. "us-gaap:ServiceOtherMember"
+                dim = mem.attrib.get("dimension")  # "srt:ProductOrServiceAxis"
+                member = (mem.text or "").strip()  # "us-gaap:ServiceOtherMember"
                 if dim and member:
                     info.dims[dim] = member
 
@@ -171,10 +144,8 @@ def parse_contexts(root: ET.Element) -> Dict[str, ContextInfo]:
 
 def get_document_period_end(root: ET.Element) -> Optional[date]:
     """
-    Look up dei:DocumentPeriodEndDate.
-
-    This identifies the "primary" reporting period of the filing —
-    crucial for filtering out irrelevant contexts (historical, segment-level, etc.).
+    Locate the dei:DocumentPeriodEndDate fact.
+    This defines the main reporting period.
     """
     target_local = "DocumentPeriodEndDate"
     for el in root.iter():
@@ -194,17 +165,8 @@ def get_document_period_end(root: ET.Element) -> Optional[date]:
 
 def is_company_total_context(ctx: ContextInfo) -> bool:
     """
-    Heuristic:
-        A context represents *company-wide consolidated totals*
-        if it has **no dimensions**.
-
-    When dimensions ARE present, they split data into segments like:
-        - Business segments
-        - Product lines
-        - Geographies
-        - Consolidation/Elimination adjustments
-
-    For consolidated totals, all dims must be empty.
+    Company-level totals have NO dimensions.
+    Dimensions indicate segment-level reporting.
     """
     return not ctx.dims
 
@@ -212,7 +174,7 @@ def is_company_total_context(ctx: ContextInfo) -> bool:
 def _concept_name(el: ET.Element) -> str:
     """
        Convert raw XML tag into a human-readable concept:
-           "{http://fasb.org/us-gaap/2025}Revenue" → "us-gaap:Revenue"
+           "{http://fasb.org/us-gaap/2025}Revenue" -> "us-gaap:Revenue"
     """
     uri, local = _split_tag(el.tag)
     if not uri:
@@ -228,28 +190,14 @@ def extract_company_totals_for_main_period(
     filing_date: date,
     limit: int = 300,
 ) -> List[FactRow]:
-    """
-    Extract consolidated company-wide totals for the document's primary reporting period.
+    """"
+    Extract consolidated totals for the main reporting period.
 
-    Selection criteria:
-
-        (1) Element has a valid contextRef
-        (2) context has NO dimensions (i.e., consolidated totals)
-        (3) context's endDate or instant == DocumentPeriodEndDate
-        (4) Value exists & is not empty
-        (5) Concept is not an explicitMember or dimensional metadata
-
-    Parameters
-    ----------
-    root : XML root element
-    contexts : dict of parsed ContextInfo
-    ticker : stock ticker symbol
-    filing_date : official filing date of the form
-    limit : maximum number of extracted facts (to prevent flooding output)
-
-    Returns
-    -------
-    List[FactRow]
+    Conditions for selecting a fact:
+        - Must reference a valid contextRef
+        - Context must have NO dimensions
+        - Context period must match DocumentPeriodEndDate
+        - Fact must have non-empty value
     """
     doc_end = get_document_period_end(root)
     rows: List[FactRow] = []
@@ -309,7 +257,9 @@ def extract_company_totals_for_main_period(
 
 
 def _group_rows_by_context(rows: Iterable[FactRow]):
-    """Group extracted facts by context_id."""
+    """
+    Group extracted facts by context_id.
+    """
     grouped = defaultdict(list)
     for r in rows:
         grouped[r.context_id].append(r)
@@ -318,13 +268,8 @@ def _group_rows_by_context(rows: Iterable[FactRow]):
 
 def print_by_context(rows: List[FactRow], contexts: Dict[str, ContextInfo], max_facts_per_ctx: int = 30) -> None:
     """
-    Pretty-print grouped facts for debugging.
-    Shows:
-        - context start/end/instant
-        - dimensions (if any)
-        - truncated fact values
-
-    This is a diagnostic helper — not meant for production output.
+    Pretty-print extracted facts grouped by context.
+    Useful for sanity-checking parsed data.
     """
     grouped = _group_rows_by_context(rows)
 

@@ -1,20 +1,15 @@
 from __future__ import annotations
-
 import datetime as dt
 import json
 import logging
 import os
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
-
 import sys
-
 from dotenv import load_dotenv
 load_dotenv()
 
 
-# Project paths
 BACKEND_ROOT = Path(__file__).resolve().parent
 SRC_ROOT = BACKEND_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
@@ -24,10 +19,26 @@ from src.app.clients.sec_client import SecClient
 from src.app.services.submissions_10x_service import (
     Filing10X,
     fetch_10x_for_companies,
-    detect_missing_10q_filings,
     merge_filings_into_payload
 )
 
+############################################################
+# Overview
+#
+# Top-level script for:
+#   - Loading the companies watchlist (ticker + CIK) from companies.json
+#   - Fetching all 10-K / 10-Q filings since a given date
+#   - Merging those filings into a master JSON
+#   - Writing/refreshing data/10x_submissions/10x_submissions.json
+#
+# This ties together:
+#   - SecClient         -> polite SEC HTTP client with throttling/backoff
+#   - submissions_10x   -> logic for parsing 10-K/10-Q filings
+#
+# Intended usage:
+#   Run periodically (cron/manual) to keep the 10x_submissions.json
+#   dataset up to date for downstream consumers.
+############################################################
 
 def _ua(par : str) -> str:
     # fall back to a decent UA if not set
@@ -64,7 +75,7 @@ def main() -> int:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
-    # Polite EDGAR usage
+    # Polite EDGAR usage: make sure SEC_USER_AGENT is set to something non-empty.
     os.environ.setdefault("SEC_USER_AGENT", _ua("SEC_USER_AGENT"))
 
     companies_path = BACKEND_ROOT / "companies.json"
@@ -72,7 +83,7 @@ def main() -> int:
         logging.error("companies.json not found at %s", companies_path)
         return 1
 
-    # Example: only filings after this date
+    # Only consider filings after this date.
     since = dt.date(2022, 1, 1)
     logging.info("Fetching 10-K / 10-Q for filings after %s", since.isoformat())
 
@@ -80,8 +91,10 @@ def main() -> int:
     logging.info("Loaded %d companies from watchlist.", len(companies))
 
     client = SecClient()
+    # Pull 10-K / 10-Q filings for all companies.
     filings: List[Filing10X] = fetch_10x_for_companies(client, companies, since)
 
+    # Optional: missing 10-Q detection (kept for later / debugging).
     """
     missing = detect_missing_10q_filings(filings, years_back=2)
 
@@ -93,7 +106,7 @@ def main() -> int:
 
 
     logging.info("Total 10-K / 10-Q filings found: %d", len(filings))
-    # --- build or update master JSON payload ---
+    #build or update master JSON
     out_dir = BACKEND_ROOT / "data" / "10x_submissions"
     out_dir.mkdir(parents=True, exist_ok=True)
 
