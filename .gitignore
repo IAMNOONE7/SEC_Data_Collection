@@ -55,3 +55,6 @@ data/
 # Logs
 *.log
 logs/
+
+!data/Examples/
+!data/Examples/**
