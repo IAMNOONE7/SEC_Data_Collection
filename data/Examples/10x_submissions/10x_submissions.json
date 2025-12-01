@@ -1,0 +1,126 @@
+{
+  "as_of": "2025-11-26",
+  "count": 10313,
+  "filings": [
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-Q",
+      "accession_number": "0001090872-25-000036",
+      "primary_document": "a-20250731.htm",
+      "filing_date": "2025-08-29"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-Q",
+      "accession_number": "0001090872-25-000021",
+      "primary_document": "a-20250430.htm",
+      "filing_date": "2025-06-02"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-Q",
+      "accession_number": "0001090872-25-000008",
+      "primary_document": "a-20250131.htm",
+      "filing_date": "2025-03-03"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-K",
+      "accession_number": "0001090872-24-000049",
+      "primary_document": "a-20241031.htm",
+      "filing_date": "2024-12-20"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-Q",
+      "accession_number": "0001090872-24-000033",
+      "primary_document": "a-20240731.htm",
+      "filing_date": "2024-08-30"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-Q",
+      "accession_number": "0001090872-24-000021",
+      "primary_document": "a-20240430.htm",
+      "filing_date": "2024-06-03"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-Q",
+      "accession_number": "0001090872-24-000011",
+      "primary_document": "a-20240131.htm",
+      "filing_date": "2024-03-05"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-K",
+      "accession_number": "0001090872-23-000020",
+      "primary_document": "a-20231031.htm",
+      "filing_date": "2023-12-20"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-Q",
+      "accession_number": "0001090872-23-000015",
+      "primary_document": "a-20230731.htm",
+      "filing_date": "2023-08-31"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-Q",
+      "accession_number": "0001090872-23-000010",
+      "primary_document": "a-20230430.htm",
+      "filing_date": "2023-05-26"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-Q",
+      "accession_number": "0001090872-23-000005",
+      "primary_document": "a-20230131.htm",
+      "filing_date": "2023-03-03"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-K",
+      "accession_number": "0001090872-22-000026",
+      "primary_document": "a-20221031.htm",
+      "filing_date": "2022-12-21"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-Q",
+      "accession_number": "0001090872-22-000017",
+      "primary_document": "a-20220731.htm",
+      "filing_date": "2022-09-01"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-Q",
+      "accession_number": "0001090872-22-000012",
+      "primary_document": "a-20220430.htm",
+      "filing_date": "2022-05-31"
+    },
+    {
+      "ticker": "A",
+      "cik": "0001090872",
+      "form": "10-Q",
+      "accession_number": "0001090872-22-000007",
+      "primary_document": "a-20220131.htm",
+      "filing_date": "2022-03-03"
+    }
+  ]
+}

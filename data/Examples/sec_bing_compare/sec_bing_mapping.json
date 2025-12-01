@@ -1,0 +1,25 @@
+{
+  "A": {
+    "Shareholders Equity": "us-gaap:StockholdersEquity",
+    "Long Term Debt": "us-gaap:LongTermDebt",
+    "Financing Cash Flow": "us-gaap:NetCashProvidedByUsedInFinancingActivities",
+    "Net Profit": "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
+    "Diluted Average Shares": "us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding",
+    "Tax Provision": "us-gaap:OtherComprehensiveIncomeForeignCurrencyTransactionAndTranslationGainLossArisingDuringPeriodNetOfTax",
+    "Current Assets": "us-gaap:AssetsCurrent",
+    "Current Liabilities": "us-gaap:LiabilitiesCurrent",
+    "Ending Cash Position": "us-gaap:CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+    "Operating Cash Flow": "us-gaap:NetCashProvidedByUsedInOperatingActivities",
+    "Gross Profit": "us-gaap:ComprehensiveIncomeNetOfTaxIncludingPortionAttributableToNoncontrollingInterest",
+    "Normalized EBITDA": "us-gaap:InventoryWorkInProcessAndRawMaterials",
+    "Operating Expenses": "us-gaap:InventoryFinishedGoods",
+    "Operating Income": "us-gaap:WeightedAverageNumberOfSharesOutstandingBasic",
+    "Investing Cash Flow": "us-gaap:NetCashProvidedByUsedInInvestingActivities",
+    "Other Income (Expense)": "us-gaap:DerivativeFairValueOfDerivativeAsset",
+    "Pre Tax Income": "us-gaap:IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+    "Cost of Goods Sold": "us-gaap:CostOfGoodsAndServicesSold",
+    "Diluted EPS": "us-gaap:EarningsPerShareDiluted",
+    "Revenue": "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+    "Free Cash Flow": "2023:SellingGeneralAndAdministrativeExpense"
+  } 
+}
